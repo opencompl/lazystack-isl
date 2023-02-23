@@ -2633,20 +2633,46 @@ static __isl_give isl_qpolynomial *substitute_non_divs(
  * (if they too depend on "div").
  */
 static void reduce_div(__isl_keep isl_qpolynomial *qp, int div,
-	__isl_keep isl_mat **mat)
+	__isl_keep isl_mat **mat, int posneg)
 {
+	// if posneg, then reduce too [-d/2, d/2) instead of [0, d-1]
+	// d = 4 then range is [-2, 1], d = 3 then range is [-1, 1]
 	int i, j;
 	isl_int v;
 	unsigned total = qp->div->n_col - qp->div->n_row - 2;
+	isl_int dhalf;
+	isl_int negdhalf;
 
 	isl_int_init(v);
+	isl_int_init(dhalf);
+	isl_int_init(negdhalf);
+	isl_int_fdiv_q_ui(dhalf, qp->div->row[div][0], 2);
+	isl_int_neg(negdhalf, dhalf);
 	for (i = 0; i < 1 + total + div; ++i) {
-		if (isl_int_is_nonneg(qp->div->row[div][1 + i]) &&
-		    isl_int_lt(qp->div->row[div][1 + i], qp->div->row[div][0]))
-			continue;
+		if (posneg) {
+			if (isl_int_ge(qp->div->row[div][1 + i], negdhalf) &&
+			    isl_int_lt(qp->div->row[div][1 + i], dhalf))
+				continue;
+		} else {
+			if (isl_int_is_nonneg(qp->div->row[div][1 + i]) &&
+			    isl_int_lt(qp->div->row[div][1 + i], qp->div->row[div][0]))
+				continue;
+		}
 		isl_int_fdiv_q(v, qp->div->row[div][1 + i], qp->div->row[div][0]);
 		isl_int_fdiv_r(qp->div->row[div][1 + i],
 				qp->div->row[div][1 + i], qp->div->row[div][0]);
+		if (posneg) {
+			/*
+				if (remcoeff > d/2) {
+					remcoeff -= d;
+					quotient++;
+				}
+			*/
+			if (isl_int_cmp(qp->div->row[div][1 + i], dhalf) > 0) {
+				isl_int_sub(qp->div->row[div][1 + i], qp->div->row[div][1 + i], qp->div->row[div][0]);
+				isl_int_add_ui(v, v, 1);
+			}
+		}
 		*mat = isl_mat_col_addmul(*mat, i, v, 1 + total + div);
 		for (j = div + 1; j < qp->div->n_row; ++j) {
 			if (isl_int_is_zero(qp->div->row[j][2 + total + div]))
@@ -2655,6 +2681,9 @@ static void reduce_div(__isl_keep isl_qpolynomial *qp, int div,
 					v, qp->div->row[j][2 + total + div]);
 		}
 	}
+
+	isl_int_clear(negdhalf);
+	isl_int_clear(dhalf);
 	isl_int_clear(v);
 }
 
@@ -2719,7 +2748,7 @@ static void invert_div(__isl_keep isl_qpolynomial *qp, int div,
  * of the enclosing divs may have to be reduced again, so we call
  * ourselves recursively if the number of divs decreases.
  */
-static __isl_give isl_qpolynomial *reduce_divs(__isl_take isl_qpolynomial *qp)
+static __isl_give isl_qpolynomial *reduce_divs(__isl_take isl_qpolynomial *qp, int posneg)
 {
 	int i;
 	isl_ctx *ctx;
@@ -2741,11 +2770,13 @@ static __isl_give isl_qpolynomial *reduce_divs(__isl_take isl_qpolynomial *qp)
 
 	for (i = 0; i < qp->div->n_row; ++i) {
 		normalize_div(qp, i);
-		reduce_div(qp, i, &mat);
+		reduce_div(qp, i, &mat, 0);
 		if (needs_invert(qp->div, i)) {
-			invert_div(qp, i, &mat);
-			reduce_div(qp, i, &mat);
+				invert_div(qp, i, &mat);
+				reduce_div(qp, i, &mat, 0);
 		}
+		if (posneg)
+			reduce_div(qp, i, &mat, 1);
 	}
 	if (!mat)
 		goto error;
@@ -2771,7 +2802,7 @@ static __isl_give isl_qpolynomial *reduce_divs(__isl_take isl_qpolynomial *qp)
 	if (new_n_div < 0)
 		return isl_qpolynomial_free(qp);
 	if (new_n_div < n_div)
-		return reduce_divs(qp);
+		return reduce_divs(qp, posneg);
 
 	return qp;
 error:
@@ -3740,7 +3771,7 @@ __isl_give isl_qpolynomial *isl_qpolynomial_from_aff(__isl_take isl_aff *aff)
 		goto error;
 
 	isl_aff_free(aff);
-	qp = reduce_divs(qp);
+	qp = reduce_divs(qp, 0);
 	qp = remove_redundant_divs(qp);
 	return qp;
 error:
@@ -4880,6 +4911,12 @@ static isl_stat split_periods(__isl_take isl_set *set,
 		return isl_stat_ok;
 	}
 
+	// fprintf(stderr, "BEFORE\n");
+	// isl_qpolynomial_dump(qp);
+	qp = reduce_divs(qp, /*posneg=*/1);
+	// fprintf(stderr, "AFTER\n");
+	// isl_qpolynomial_dump(qp);
+
 	div_pos = isl_qpolynomial_domain_var_offset(qp, isl_dim_div);
 	if (div_pos < 0)
 		goto error;
@@ -4919,6 +4956,7 @@ static isl_stat split_periods(__isl_take isl_set *set,
 	if (i < qp->div->n_row) {
 		r = split_div(set, qp, i, min, max, data);
 	} else {
+		qp = reduce_divs(qp, /*posneg=*/0);
 		pwqp = isl_pw_qpolynomial_alloc(set, qp);
 		data->res = isl_pw_qpolynomial_add_disjoint(data->res, pwqp);
 	}
