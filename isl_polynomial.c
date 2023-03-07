@@ -4334,6 +4334,7 @@ __isl_give isl_aff *isl_aff_div_from_mat(__isl_keep isl_space *space,
 		return NULL;
 	isl_seq_cpy(aff->v->el, divs->row[pos], aff->v->size);
 	aff = isl_aff_normalize(aff);
+	aff = isl_aff_floor(aff);
 	return aff;
 }
 
@@ -4968,7 +4969,7 @@ static isl_stat merge_offset_divs(__isl_take isl_set *set,
 static isl_stat merge_offset_div_impl(int offset, __isl_take isl_set *set,
 	__isl_take isl_qpolynomial *qp, int div_1, int div_2, isl_pw_qpolynomial **res)
 {
-  if (offset == 0 || offset == 1)
+  if (!(offset == 0 || offset == 1))
 		goto error;
 
 	isl_size div_pos;
@@ -4976,10 +4977,12 @@ static isl_stat merge_offset_div_impl(int offset, __isl_take isl_set *set,
 	isl_aff *aff_div_1 = isl_aff_div_from_mat(isl_set_get_space(set), qp->div, div_1);
 	isl_aff *aff_div_2 = isl_aff_div_from_mat(isl_set_get_space(set), qp->div, div_2);
 	if (offset != 0)
-		aff_div_2 = isl_aff_add_constant_si(aff_div_2, offset);
+		aff_div_1 = isl_aff_add_constant_si(aff_div_1, offset);
 	// slice = set_divs_eq_slice(isl_set_get_space(set), qp, div_1, div_2);
-	isl_basic_set *slice;
-	slice = isl_aff_eq_basic_set(aff_div_1, aff_div_2);
+	// isl_aff_dump(aff_div_1);
+	// isl_aff_dump(aff_div_2);
+	isl_basic_set *slice = isl_aff_eq_basic_set(aff_div_1, aff_div_2);
+	// isl_basic_set_dump(slice);
 	set = isl_set_intersect(isl_set_from_basic_set(slice), set);
 
 	div_pos = isl_qpolynomial_domain_var_offset(qp, isl_dim_div);
@@ -4997,12 +5000,16 @@ static isl_stat merge_offset_div_impl(int offset, __isl_take isl_set *set,
 	}
 
 	isl_vec *f = isl_vec_alloc(qp->dim->ctx, qp->div->n_col - 1);
+	f = isl_vec_clr(f);
 	isl_int_set_si(f->el[1 + div_pos + div_1], 1);
 	isl_int_set_si(f->el[0], offset);
 	isl_poly *subst_expr = isl_poly_from_affine(qp->dim->ctx, f->el, qp->dim->ctx->one, f->size);
+	isl_vec_free(f);
 	// cst = isl_poly_rat_cst(qp->dim->ctx, v, qp->dim->ctx->one);
 	// isl_qpolynomial_dump(qp);
 	qp = substitute_div(qp, div_2, subst_expr);
+	// isl_qpolynomial_dump(qp);
+	// fprintf(stderr, "===============\n");
 	// isl_qpolynomial_dump(qp);
 
 	return merge_offset_divs(set, qp, res);
