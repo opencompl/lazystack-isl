@@ -8,6 +8,7 @@
  * 91893 Orsay, France 
  */
 
+#include "isl/aff.h"
 #include <stdlib.h>
 #include <isl_ctx_private.h>
 #include <isl_map_private.h>
@@ -4321,6 +4322,21 @@ isl_size isl_term_get_exp(__isl_keep isl_term *term,
 	return term->pow[offset + pos];
 }
 
+__isl_give isl_aff *isl_aff_div_from_mat(__isl_keep isl_space *space,
+	__isl_keep isl_mat *divs, unsigned pos)
+{
+	isl_local_space *ls;
+	isl_aff *aff;
+	ls = isl_local_space_alloc_div(isl_space_copy(space),
+					isl_mat_copy(divs));
+	aff = isl_aff_alloc(ls);
+	if (!aff)
+		return NULL;
+	isl_seq_cpy(aff->v->el, divs->row[pos], aff->v->size);
+	aff = isl_aff_normalize(aff);
+	return aff;
+}
+
 __isl_give isl_aff *isl_term_get_div(__isl_keep isl_term *term, unsigned pos)
 {
 	isl_local_space *ls;
@@ -4819,6 +4835,51 @@ error:
 	return NULL;
 }
 
+// /* create a slice where div_1 = div_2, where
+// it is guaranteed that div_1 = floor(f/m) and div_2 = floor((c + f)/m)
+// where c is a constant.
+
+// floor(f/m) = floor((c + f)/m)
+
+// i.e.
+// v*m <= f <= v*m + m-1 iff v*m <= c + f <= v*m + m-1
+
+// */
+// static __isl_give isl_set *set_divs_eq_slice(__isl_take isl_space *space,
+// 	__isl_keep isl_qpolynomial *qp, int div_i, int div_j)
+// {
+// 	isl_size total;
+// 	isl_basic_set *bset = NULL;
+// 	int k;
+
+// 	total = isl_space_dim(space, isl_dim_all);
+// 	if (total < 0 || !qp)
+// 		goto error;
+
+// 	bset = isl_basic_set_alloc_space(isl_space_copy(space), 0, 0, 2);
+
+// 	k = isl_basic_set_alloc_inequality(bset);
+// 	if (k < 0)
+// 		goto error;
+// 	isl_seq_cpy(bset->ineq[k], qp->div->row[div] + 1, 1 + total);
+// 	isl_int_submul(bset->ineq[k][0], v, qp->div->row[div][0]);
+
+// 	k = isl_basic_set_alloc_inequality(bset);
+// 	if (k < 0)
+// 		goto error;
+// 	isl_seq_neg(bset->ineq[k], qp->div->row[div] + 1, 1 + total);
+// 	isl_int_addmul(bset->ineq[k][0], v, qp->div->row[div][0]);
+// 	isl_int_add(bset->ineq[k][0], bset->ineq[k][0], qp->div->row[div][0]);
+// 	isl_int_sub_ui(bset->ineq[k][0], bset->ineq[k][0], 1);
+
+// 	isl_space_free(space);
+// 	return isl_set_from_basic_set(bset);
+// error:
+// 	isl_basic_set_free(bset);
+// 	isl_space_free(space);
+// 	return NULL;
+// }
+
 static isl_stat split_periods(__isl_take isl_set *set,
 	__isl_take isl_qpolynomial *qp, void *user);
 
@@ -4882,6 +4943,152 @@ error:
 	isl_set_free(set);
 	isl_qpolynomial_free(qp);
 	return isl_stat_error;
+}
+
+// static isl_aff aff_from_div_mat(__isl_take isl_space *space, __isl_keep isl_mat *divs, int div) {
+// 	isl_aff *res = isl_aff_val_on_domain_space(space, divs->row[div][1]);
+// 	isl_local_space *ls = isl_local_space_from_space(space);
+// 	int num_set_dims = isl_space_dim(space, isl_dim_set);
+// 	int offset = 2;
+// 	for (unsigned i = 0; i < num_set_dims; ++i) {
+// 		res = isl_aff_add_coefficient_val(res, isl_dim_set, i, divs->row[div][offset + i]);
+// 	}
+// 	offset += num_set_dims;
+// 	int div_pos = isl_qpolynomial_domain_var_offset(qp, isl_dim_div);
+// 	int num_div_dims = isl_space_dim(space, isl_dim_div);
+// 	for (unsigned i = 0; i < num_div_dims; ++i) {
+// 		isl_aff *coeff_div = isl_aff_set_dim_name
+// 		res = isl_aff_add_constant_val
+// 	}
+// }
+
+static isl_stat merge_offset_divs(__isl_take isl_set *set,
+	__isl_take isl_qpolynomial *qp, void *user);
+
+static isl_stat merge_offset_div_impl(int offset, __isl_take isl_set *set,
+	__isl_take isl_qpolynomial *qp, int div_1, int div_2, isl_pw_qpolynomial **res)
+{
+  if (offset == 0 || offset == 1)
+		goto error;
+
+	isl_size div_pos;
+
+	isl_aff *aff_div_1 = isl_aff_div_from_mat(isl_set_get_space(set), qp->div, div_1);
+	isl_aff *aff_div_2 = isl_aff_div_from_mat(isl_set_get_space(set), qp->div, div_2);
+	if (offset != 0)
+		aff_div_2 = isl_aff_add_constant_si(aff_div_2, offset);
+	// slice = set_divs_eq_slice(isl_set_get_space(set), qp, div_1, div_2);
+	isl_basic_set *slice;
+	slice = isl_aff_eq_basic_set(aff_div_1, aff_div_2);
+	set = isl_set_intersect(isl_set_from_basic_set(slice), set);
+
+	div_pos = isl_qpolynomial_domain_var_offset(qp, isl_dim_div);
+	if (div_pos < 0)
+		goto error;
+
+	for (int i = div_2 + 1; i < qp->div->n_row; ++i) {
+		if (isl_int_is_zero(qp->div->row[i][2 + div_pos + div_2]))
+			continue;
+		isl_int_add(qp->div->row[i][2 + div_pos + div_1],
+				qp->div->row[i][2 + div_pos + div_1], qp->div->row[i][2 + div_pos + div_2]);
+		if (offset == 1)
+			isl_int_add(qp->div->row[i][1], qp->div->row[i][1], qp->div->row[i][2 + div_pos + div_2]);
+		isl_int_set_si(qp->div->row[i][2 + div_pos + div_2], 0);
+	}
+
+	isl_vec *f = isl_vec_alloc(qp->dim->ctx, qp->div->n_col - 1);
+	isl_int_set_si(f->el[1 + div_pos + div_1], 1);
+	isl_int_set_si(f->el[0], offset);
+	isl_poly *subst_expr = isl_poly_from_affine(qp->dim->ctx, f->el, qp->dim->ctx->one, f->size);
+	// cst = isl_poly_rat_cst(qp->dim->ctx, v, qp->dim->ctx->one);
+	// isl_qpolynomial_dump(qp);
+	qp = substitute_div(qp, div_2, subst_expr);
+	// isl_qpolynomial_dump(qp);
+
+	return merge_offset_divs(set, qp, res);
+error:
+	isl_set_free(set);
+	isl_qpolynomial_free(qp);
+	return isl_stat_error;
+}
+
+static isl_stat merge_offset_div(__isl_take isl_set *set,
+	__isl_take isl_qpolynomial *qp, int div_1, int div_2, isl_pw_qpolynomial **res)
+{
+	isl_stat stat = merge_offset_div_impl(0, isl_set_copy(set), isl_qpolynomial_copy(qp), div_1, div_2, res);
+	if (stat < 0)
+		goto error;
+	stat = merge_offset_div_impl(1, set, qp, div_1, div_2, res);
+	if (stat < 0)
+		goto error;
+	return isl_stat_ok;
+error:
+	isl_set_free(set);
+	isl_qpolynomial_free(qp);
+	return isl_stat_error;
+}
+
+static isl_stat merge_offset_divs(__isl_take isl_set *set,
+	__isl_take isl_qpolynomial *qp, void *user)
+{
+	// isl_qpolynomial_dump(qp);
+	isl_pw_qpolynomial **res = (isl_pw_qpolynomial **)user;
+
+	if (!set || !qp)
+		goto error;
+
+	if (qp->div->n_row == 0) {
+		// isl_pw_qpolynomial_dump(res);
+		isl_pw_qpolynomial *to_add = isl_pw_qpolynomial_alloc(set, qp);
+		// isl_pw_qpolynomial_dump(to_add);
+		*res = isl_pw_qpolynomial_add_disjoint(*res, to_add);
+		return isl_stat_ok;
+	}
+
+	qp = reduce_divs(qp, /*posneg=*/0);
+
+	int div_pos = isl_qpolynomial_domain_var_offset(qp, isl_dim_div);
+	if (div_pos < 0)
+		goto error;
+
+	int found = 0;
+	int i, j;
+	for (i = 0; i < qp->div->n_row; ++i) {
+		for (int j = i + 1; j < qp->div->n_row; ++j) {
+			if (isl_int_ne(qp->div->row[i][0], qp->div->row[j][0]))
+				continue;
+			if (!isl_seq_eq(qp->div->row[i] + 2, qp->div->row[j] + 2,
+							qp->div->n_col - 2))
+				continue;
+			if (isl_int_le(qp->div->row[i][1], qp->div->row[j][1]))
+				return merge_offset_div(set, qp, i, j, res);
+			else
+				return merge_offset_div(set, qp, j, i, res);
+		}
+	}
+
+	*res = isl_pw_qpolynomial_add_disjoint(*res, isl_pw_qpolynomial_alloc(set, qp));
+	return isl_stat_ok;
+error:
+	isl_set_free(set);
+	isl_qpolynomial_free(qp);
+	return isl_stat_error;
+}
+
+__isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_merge_offset_divs(
+	__isl_take isl_pw_qpolynomial *pwqp)
+{
+	isl_pw_qpolynomial *res = isl_pw_qpolynomial_zero(isl_pw_qpolynomial_get_space(pwqp));
+
+	if (isl_pw_qpolynomial_foreach_piece(pwqp, &merge_offset_divs, &res) < 0)
+		goto error;
+	isl_pw_qpolynomial_free(pwqp);
+
+	return res;
+error:
+	isl_pw_qpolynomial_free(res);
+	isl_pw_qpolynomial_free(pwqp);
+	return NULL;
 }
 
 /* If "qp" refers to any integer division

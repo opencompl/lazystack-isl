@@ -303,6 +303,9 @@ __isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_gist_params(
 __isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_split_periods(
 	__isl_take isl_pw_qpolynomial *pwqp, int max_periods);
 
+__isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_merge_offset_divs(
+	__isl_take isl_pw_qpolynomial *pwqp);
+
 __isl_give isl_pw_qpolynomial *isl_basic_set_multiplicative_call(
 	__isl_take isl_basic_set *bset,
 	__isl_give isl_pw_qpolynomial *(*fn)(__isl_take isl_basic_set *bset));
