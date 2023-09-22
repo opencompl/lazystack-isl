@@ -3318,6 +3318,78 @@ static __isl_give isl_qpolynomial *isl_qpolynomial_zero_in_space(
 #include <isl_pw_split_dims_templ.c>
 #include <isl_pw_sub_templ.c>
 
+static __isl_give PW *FN(PW,union_add_nosimp_)(__isl_take PW *pw1, __isl_take PW *pw2)
+{
+	int i, j, n;
+	struct PW *res;
+	isl_ctx *ctx;
+	isl_set *set;
+
+	if (FN(PW,align_params_bin)(&pw1, &pw2) < 0)
+		goto error;
+
+	ctx = isl_space_get_ctx(pw1->dim);
+	if (!OPT_EQUAL_TYPES(pw1->, pw2->))
+		isl_die(ctx, isl_error_invalid,
+			"fold types don't match", goto error);
+	if (FN(PW,check_equal_space)(pw1, pw2) < 0)
+		goto error;
+
+	if (FN(PW,IS_ZERO)(pw1)) {
+		FN(PW,free)(pw1);
+		return pw2;
+	}
+
+	if (FN(PW,IS_ZERO)(pw2)) {
+		FN(PW,free)(pw2);
+		return pw1;
+	}
+
+	n = (pw1->n + 1) * (pw2->n + 1);
+	res = FN(PW,alloc_size)(isl_space_copy(pw1->dim)
+				OPT_TYPE_ARG(pw1->), n);
+
+	for (i = 0; i < pw1->n; ++i) {
+		set = isl_set_copy(pw1->p[i].set);
+		for (j = 0; j < pw2->n; ++j) {
+			struct isl_set *common;
+			EL *sum;
+			common = isl_set_intersect(isl_set_copy(pw1->p[i].set),
+						isl_set_copy(pw2->p[j].set));
+			if (isl_set_plain_is_empty(common)) {
+				isl_set_free(common);
+				continue;
+			}
+			set = isl_set_subtract(set,
+					isl_set_copy(pw2->p[j].set));
+
+			sum = FN(EL,add)(
+						   FN(EL,copy)(pw1->p[i].FIELD),
+						   FN(EL,copy)(pw2->p[j].FIELD));
+
+			res = FN(PW,add_piece)(res, common, sum);
+		}
+		res = FN(PW,add_piece)(res, set, FN(EL,copy)(pw1->p[i].FIELD));
+	}
+
+	for (j = 0; j < pw2->n; ++j) {
+		set = isl_set_copy(pw2->p[j].set);
+		for (i = 0; i < pw1->n; ++i)
+			set = isl_set_subtract(set,
+					isl_set_copy(pw1->p[i].set));
+		res = FN(PW,add_piece)(res, set, FN(EL,copy)(pw2->p[j].FIELD));
+	}
+
+	FN(PW,free)(pw1);
+	FN(PW,free)(pw2);
+
+	return res;
+error:
+	FN(PW,free)(pw1);
+	FN(PW,free)(pw2);
+	return NULL;
+}
+
 #undef BASE
 #define BASE pw_qpolynomial
 
@@ -3326,6 +3398,95 @@ static __isl_give isl_qpolynomial *isl_qpolynomial_zero_in_space(
 #include <isl_union_eval.c>
 #include <isl_union_neg.c>
 #include <isl_union_sub_templ.c>
+
+static __isl_give UNION *FN(UNION,add_part_generic_nosimp)(__isl_take UNION *u,
+	__isl_take PART *part, int disjoint)
+{
+	int empty;
+	struct isl_hash_table_entry *entry;
+
+	if (!part)
+		goto error;
+
+	empty = FN(PART,IS_ZERO)(part);
+	if (empty < 0)
+		goto error;
+	if (empty) {
+		FN(PART,free)(part);
+		return u;
+	}
+
+	u = FN(UNION,align_params)(u, FN(PART,get_space)(part));
+	part = FN(PART,align_params)(part, FN(UNION,get_space)(u));
+
+	u = FN(UNION,cow)(u);
+
+	if (!u)
+		goto error;
+
+	if (FN(UNION,check_disjoint_domain_other)(u, part) < 0)
+		goto error;
+	entry = FN(UNION,find_part_entry)(u, part->dim, 1);
+	if (!entry)
+		goto error;
+
+	if (!entry->data)
+		entry->data = part;
+	else {
+		if (disjoint &&
+		    FN(UNION,check_disjoint_domain)(entry->data, part) < 0)
+			goto error;
+		entry->data = FN(PART,add_nosimp)(entry->data,
+						FN(PART,copy)(part));
+		empty = FN(PART,IS_ZERO)(entry->data);
+		if (empty < 0)
+			goto error;
+		if (empty)
+			u = FN(UNION,remove_part_entry)(u, entry);
+		FN(PART,free)(part);
+	}
+
+	return u;
+error:
+	FN(PART,free)(part);
+	FN(UNION,free)(u);
+	return NULL;
+}
+
+/* Add "part" to *u, taking the union sum if "u" already has
+ * a part defined on the same space as "part".
+ */
+static isl_stat FN(UNION,union_add_part_nosimp)(__isl_take PART *part, void *user)
+{
+	UNION **u = (UNION **)user;
+
+	*u = FN(UNION,add_part_generic_nosimp)(*u, part, 0);
+
+	return isl_stat_ok;
+}
+
+__isl_give UNION *FN(UNION,add_nosimp)(__isl_take UNION *u1,
+	__isl_take UNION *u2)
+{
+	u1 = FN(UNION,align_params)(u1, FN(UNION,get_space)(u2));
+	u2 = FN(UNION,align_params)(u2, FN(UNION,get_space)(u1));
+
+	u1 = FN(UNION,cow)(u1);
+
+	if (!u1 || !u2)
+		goto error;
+
+	if (FN(FN(UNION,foreach),BASE)(u2, &FN(UNION,union_add_part_nosimp), &u1) < 0)
+		goto error;
+
+	FN(UNION,free)(u2);
+
+	return u1;
+error:
+	FN(UNION,free)(u1);
+	FN(UNION,free)(u2);
+	return NULL;
+}
 
 int isl_pw_qpolynomial_is_one(__isl_keep isl_pw_qpolynomial *pwqp)
 {
@@ -3346,6 +3507,13 @@ __isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_add(
 	__isl_take isl_pw_qpolynomial *pwqp2)
 {
 	return isl_pw_qpolynomial_union_add_(pwqp1, pwqp2);
+}
+
+__isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_add_nosimp(
+	__isl_take isl_pw_qpolynomial *pwqp1,
+	__isl_take isl_pw_qpolynomial *pwqp2)
+{
+	return isl_pw_qpolynomial_union_add_nosimp_(pwqp1, pwqp2);
 }
 
 __isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_mul(

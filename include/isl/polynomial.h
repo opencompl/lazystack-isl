@@ -220,6 +220,12 @@ __isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_drop_unused_params(
 __isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_add(
 	__isl_take isl_pw_qpolynomial *pwqp1,
 	__isl_take isl_pw_qpolynomial *pwqp2);
+__isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_add_nosimp(
+	__isl_take isl_pw_qpolynomial *pwqp1,
+	__isl_take isl_pw_qpolynomial *pwqp2);
+__isl_give isl_union_pw_qpolynomial *isl_union_pw_qpolynomial_add_nosimp(
+	__isl_take isl_union_pw_qpolynomial *pwqp1,
+	__isl_take isl_union_pw_qpolynomial *pwqp2);
 __isl_give isl_pw_qpolynomial *isl_pw_qpolynomial_sub(
 	__isl_take isl_pw_qpolynomial *pwqp1,
 	__isl_take isl_pw_qpolynomial *pwqp2);
