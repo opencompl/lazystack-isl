@@ -5149,7 +5149,7 @@ static isl_stat merge_offset_div_impl(int offset, __isl_take isl_set *set,
 	// slice = set_divs_eq_slice(isl_set_get_space(set), qp, div_1, div_2);
 	// isl_aff_dump(aff_div_1);
 	// isl_aff_dump(aff_div_2);
-	isl_basic_set *slice = isl_aff_eq_basic_set(aff_div_1, aff_div_2);
+	isl_basic_set *slice = (isl_basic_set *)isl_aff_eq_basic_set(aff_div_1, aff_div_2);
 	// isl_basic_set_dump(slice);
 	set = isl_set_intersect(isl_set_from_basic_set(slice), set);
 
