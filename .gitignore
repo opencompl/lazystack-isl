@@ -82,3 +82,6 @@ isl_test_cpp17
 isl_test_cpp17-checked
 isl_test_int
 schedule_test.sh
+
+imath_wrap/.dirstamp
+isl_test_imath
